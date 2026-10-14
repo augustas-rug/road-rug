@@ -19,18 +19,15 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      - name: Publish (x64 and ARM64, self-contained single file)
+      - name: Publish (self-contained single file; also runs on ARM PCs through Windows' emulation)
         shell: pwsh
         run: |
-          foreach ($rid in 'win-x64', 'win-arm64') {
-            dotnet publish windows/RoadRug.csproj -c Release -r $rid --self-contained true `
-              -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
-              -p:EnableCompressionInSingleFile=true -p:DebugType=none -o "out/$rid"
-            if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          }
+          dotnet publish windows/RoadRug.csproj -c Release -r win-x64 --self-contained true `
+            -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:EnableCompressionInSingleFile=true -p:DebugType=none -o out/win-x64
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
           New-Item -ItemType Directory -Force dist | Out-Null
-          Compress-Archive -Path out/win-x64/RoadRug.exe -DestinationPath dist/RoadRug-Windows-x64.zip -Force
-          Compress-Archive -Path out/win-arm64/RoadRug.exe -DestinationPath dist/RoadRug-Windows-ARM64.zip -Force
+          Compress-Archive -Path out/win-x64/RoadRug.exe -DestinationPath dist/RoadRug-Windows.zip -Force
           Get-ChildItem dist | Format-Table Name, Length
 
       - name: Snapshot test (renders the scene and checks the physics)

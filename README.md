@@ -7,14 +7,10 @@
 <p align="center">
   A physics rug for your desktop. Sweep your mess under it.
   <br>
-  <b>Download:</b>
+  <b>Download for</b>
   <a href="https://github.com/augustas-rug/road-rug/releases/latest/download/RoadRug-macOS.zip">macOS</a>
   ·
-  <a href="https://github.com/augustas-rug/road-rug/releases/latest/download/RoadRug-Windows-x64.zip">Windows</a>
-  ·
-  <a href="https://github.com/augustas-rug/road-rug/releases/latest/download/RoadRug-Windows-ARM64.zip">Windows on ARM</a>
-  <br>
-  <a href="docs/demo.mp4">Watch the demo</a>
+  <a href="https://github.com/augustas-rug/road-rug/releases/latest/download/RoadRug-Windows.zip">Windows</a>
 </p>
 
 <p align="center">
@@ -52,7 +48,7 @@ Requires macOS 14 Sonoma or later, on Apple Silicon or Intel.
 
 ### Windows
 
-1. Download [`RoadRug-Windows-x64.zip`](https://github.com/augustas-rug/road-rug/releases/latest/download/RoadRug-Windows-x64.zip), or [`RoadRug-Windows-ARM64.zip`](https://github.com/augustas-rug/road-rug/releases/latest/download/RoadRug-Windows-ARM64.zip) for ARM laptops, and unzip it anywhere, for example into `Documents\Road Rug`.
+1. [Download `RoadRug-Windows.zip`](https://github.com/augustas-rug/road-rug/releases/latest/download/RoadRug-Windows.zip) and unzip it anywhere, for example into `Documents\Road Rug`.
 2. Run **RoadRug.exe**. It's a single file with nothing else to install.
 3. The app isn't code-signed yet, so Windows SmartScreen may warn you the first time. Choose **More info**, then **Run anyway**.
 4. The rug drops onto your desktop, and a rug icon appears in the system tray. Turn on **Start with Windows** from the tray menu to keep it around.
