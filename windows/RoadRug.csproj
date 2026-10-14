@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ApplicationIcon>..\Resources\AppIcon.ico</ApplicationIcon>
+    <AssemblyName>RoadRug</AssemblyName>
+    <RootNamespace>RoadRug</RootNamespace>
+    <Product>Road Rug</Product>
+    <Company>Augustas Armalis</Company>
+    <Authors>Augustas Armalis</Authors>
+    <Copyright>© 2026 Augustas Armalis. MIT License.</Copyright>
+    <Description>A physics rug for your desktop. Sweep your mess under it.</Description>
+    <Version>1.1.0</Version>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <TieredPGO>true</TieredPGO>
+    <ServerGarbageCollector>false</ServerGarbageCollector>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="..\Resources\rug.png" LogicalName="rug.png" />
+  </ItemGroup>
+
+</Project>

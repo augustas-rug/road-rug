@@ -64,4 +64,20 @@ task.arguments = ["-c", "icns", iconset.path, "-o", out.path]
 try! task.run()
 task.waitUntilExit()
 try! render(512).write(to: root.appendingPathComponent("docs/icon.png"))
-print("Wrote \(out.path)")
+
+// Windows icon: an .ico whose entries are PNGs (supported since Windows Vista).
+let sizes = [16, 24, 32, 48, 64, 128, 256]
+let pngs = sizes.map(render)
+var ico = Data()
+func le16(_ v: Int) { ico.append(contentsOf: [UInt8(v & 255), UInt8(v >> 8 & 255)]) }
+func le32(_ v: Int) { le16(v & 0xFFFF); le16(v >> 16 & 0xFFFF) }
+le16(0); le16(1); le16(sizes.count)
+var offset = 6 + 16 * sizes.count
+for (s, png) in zip(sizes, pngs) {
+    ico.append(UInt8(s >= 256 ? 0 : s)); ico.append(UInt8(s >= 256 ? 0 : s)); ico.append(0); ico.append(0)
+    le16(1); le16(32); le32(png.count); le32(offset)
+    offset += png.count
+}
+for png in pngs { ico.append(png) }
+try! ico.write(to: root.appendingPathComponent("Resources/AppIcon.ico"))
+print("Wrote \(out.path) and Resources/AppIcon.ico")
