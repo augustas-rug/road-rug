@@ -5,22 +5,29 @@
 <h1 align="center">Road Rug</h1>
 
 <p align="center">
-  A physics rug for your Mac desktop. Sweep your mess under it.
+  A physics rug for your desktop. Sweep your mess under it.
   <br>
-  <a href="https://github.com/Augustas-Armalis/road-rug/releases/latest/download/RoadRug.zip"><b>Download for macOS</b></a>
+  <b>Download:</b>
+  <a href="https://github.com/augustas-rug/road-rug/releases/latest/download/RoadRug-macOS.zip">macOS</a>
   ·
+  <a href="https://github.com/augustas-rug/road-rug/releases/latest/download/RoadRug-Windows-x64.zip">Windows</a>
+  ·
+  <a href="https://github.com/augustas-rug/road-rug/releases/latest/download/RoadRug-Windows-ARM64.zip">Windows on ARM</a>
+  <br>
   <a href="docs/demo.mp4">Watch the demo</a>
 </p>
 
 <p align="center">
-  <img src="docs/demo.gif" width="720" alt="Road Rug: dragging, lifting and folding a city-roads play mat on the macOS desktop">
+  <img src="docs/demo.gif" width="720" alt="Road Rug: dragging, lifting and folding a city-roads play mat on the desktop">
 </p>
 
 Road Rug puts a kids' city-roads play mat on your desktop, right above your icons and below every window. It's a real cloth simulation: grab it, drag it around, peel up a corner, fold it over. Drop files onto it and they're swept underneath, leaving little lumps in the rug. Bigger files make bigger lumps.
 
+It runs natively on **macOS** (Swift + Metal) and **Windows** (C# / .NET), with the same physics and look on both.
+
 ## Features
 
-- **Real cloth physics:** a heavy, thick rug that drapes, folds over itself and settles flat. It runs on Metal at your display's refresh rate, then sleeps when still (around 1% CPU idle).
+- **Real cloth physics:** a heavy, thick rug that drapes, folds over itself and settles flat, then sleeps when still.
 - **Sweep files under the rug:** drag anything from your desktop onto the rug and it disappears underneath. It's moved into a hidden folder, not deleted.
 - **Lumps:** everything hidden under the rug makes a soft bump, sized by how big it is.
 - **Get things back:** lift a corner or slide the rug away to uncover your files, then drag them back to the desktop or double-click to open.
@@ -29,7 +36,9 @@ Road Rug puts a kids' city-roads play mat on your desktop, right above your icon
 
 ## Install
 
-1. [Download `RoadRug.zip`](https://github.com/Augustas-Armalis/road-rug/releases/latest/download/RoadRug.zip) and unzip it.
+### macOS
+
+1. [Download `RoadRug-macOS.zip`](https://github.com/augustas-rug/road-rug/releases/latest/download/RoadRug-macOS.zip) and unzip it.
 2. Move **Road Rug.app** into your Applications folder.
 3. The app isn't notarized, so macOS blocks the first launch. Either right-click the app and choose **Open**, or run:
 
@@ -41,27 +50,38 @@ Road Rug puts a kids' city-roads play mat on your desktop, right above your icon
 
 Requires macOS 14 Sonoma or later, on Apple Silicon or Intel.
 
+### Windows
+
+1. Download [`RoadRug-Windows-x64.zip`](https://github.com/augustas-rug/road-rug/releases/latest/download/RoadRug-Windows-x64.zip), or [`RoadRug-Windows-ARM64.zip`](https://github.com/augustas-rug/road-rug/releases/latest/download/RoadRug-Windows-ARM64.zip) for ARM laptops, and unzip it anywhere, for example into `Documents\Road Rug`.
+2. Run **RoadRug.exe**. It's a single file with nothing else to install.
+3. The app isn't code-signed yet, so Windows SmartScreen may warn you the first time. Choose **More info**, then **Run anyway**.
+4. The rug drops onto your desktop, and a rug icon appears in the system tray. Turn on **Start with Windows** from the tray menu to keep it around.
+
+Requires Windows 10 or 11.
+
 ## How to use it
 
 | Do this | To |
 | --- | --- |
 | Drag the middle of the rug | Slide the whole rug around |
 | Drag a corner or edge | Lift it and fold it over |
-| Hold <kbd>⌥</kbd> and drag anywhere | Lift from that spot |
-| Two-finger rotate on the trackpad | Twist the rug |
+| Hold <kbd>⌥ Option</kbd> (Mac) or <kbd>Alt</kbd> (Windows) and drag anywhere | Lift from that spot |
+| Two-finger rotate (Mac trackpad) or <kbd>Shift</kbd> + scroll (Windows) | Twist the rug |
 | Drop files from the desktop onto it | Sweep them under the rug |
 | Drag an uncovered item off the rug | Put it back on your desktop |
 | Double-click the rug | Lay it flat again |
-| Right-click the rug, or the menu-bar icon | Straighten, recenter, show what's hidden, put everything back, quit |
+| Right-click the rug, or use the menu-bar / tray icon | Straighten, recenter, show what's hidden, put everything back, quit |
 
-Swept items live in `~/Library/Application Support/Road Rug/Under the Rug`. **Put Everything Back on Desktop** in the menu returns them all at once.
+Swept items live in `~/Library/Application Support/Road Rug/Under the Rug` on macOS and `%APPDATA%\Road Rug\Under the Rug` on Windows. **Put Everything Back on Desktop** in the menu returns them all at once.
 
 ## Build from source
+
+### macOS
 
 You only need the Xcode Command Line Tools (`xcode-select --install`), not the full Xcode.
 
 ```bash
-git clone https://github.com/Augustas-Armalis/road-rug.git
+git clone https://github.com/augustas-rug/road-rug.git
 cd road-rug
 ./build.sh
 open "build/Road Rug.app"
@@ -69,25 +89,44 @@ open "build/Road Rug.app"
 
 `./build.sh --zip` also packages `dist/RoadRug.zip`, a universal build for Apple Silicon and Intel.
 
+### Windows
+
+You need the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0).
+
+```powershell
+git clone https://github.com/augustas-rug/road-rug.git
+cd road-rug
+dotnet run --project windows -c Release
+```
+
+To make the single-file `RoadRug.exe` that the releases ship:
+
+```powershell
+dotnet publish windows -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true -o out
+```
+
 ### How it works
 
-- **`Sources/Cloth.swift`:** a position-based dynamics cloth (49 × 26 particles) with stretch, shear and bending constraints. It adds Coulomb friction against the desktop, contact between folded layers, and a floor height field for the lumps.
-- **`Sources/RugView.swift`:** a transparent, click-through Metal view in a borderless window just above the desktop icons. It renders the rug as a thick sheet (printed pile, felt backing, bound edge with rounded corners) plus a soft shadow. It also handles the mouse, drag and drop, and saving state.
-- **`Sources/RugTexture.swift`:** loads the rug texture and draws icons for the files hidden under the rug.
+- **Physics** (`Sources/Cloth.swift`, `windows/Cloth.cs`): a position-based dynamics cloth (49 × 26 particles) with stretch, shear and bending constraints. It adds Coulomb friction against the desktop, contact between folded layers, and a floor height field for the lumps. The two platforms share the same algorithm and numbers.
+- **macOS** (`Sources/`): a transparent, click-through Metal view in a borderless window just above the desktop icons. It renders the rug as a thick sheet (printed pile, felt backing, bound edge with rounded corners) with a soft shadow.
+- **Windows** (`windows/`): a per-pixel-alpha layered window kept directly above the desktop icons. It holds only the area around the rug and follows it as it moves. A small multi-core software rasterizer draws the same thick sheet, shadow and icons.
 
-`RoadRug --snapshot <folder>` runs a scripted, headless scene: settling over lumps, folding a corner, then dragging. It writes PNG frames, which is handy for checking physics or rendering changes. To regenerate the app icon from the texture, run `swift scripts/make-icon.swift`.
+Both versions have a headless test scene: `RoadRug --snapshot <folder>` settles the rug over lumps, folds a corner and drags it, writing PNG frames. CI runs it on macOS and Windows for every push. Run `swift scripts/make-icon.swift` to regenerate the app icons from the texture.
 
 ### Making a demo
 
-`scripts/demo-mess.sh` fills your desktop with about 40 realistic junk files to sweep under the rug on camera. `scripts/demo-clean.sh` moves exactly those files to the Trash afterwards, even if they're under the rug.
+`scripts/demo-mess.sh` (macOS) fills your desktop with about 40 realistic junk files to sweep under the rug on camera. `scripts/demo-clean.sh` moves exactly those files to the Trash afterwards, even if they're under the rug.
 
 ## Uninstall
 
-Quit Road Rug from its menu, choosing **Put Everything Back on Desktop** first if anything is still under the rug. Then delete the app and `~/Library/Application Support/Road Rug`.
+Choose **Put Everything Back on Desktop** first if anything is still under the rug, then quit Road Rug from its menu.
+
+- **macOS:** delete the app and `~/Library/Application Support/Road Rug`.
+- **Windows:** turn off **Start with Windows** if you turned it on, then delete `RoadRug.exe` and `%APPDATA%\Road Rug`.
 
 ## Credits
 
-Made by [Augustas Armalis](https://github.com/Augustas-Armalis).
+Made by [Augustas Armalis](https://github.com/augustas-rug).
 Inspired by Terkel Gjervig's "Desktop Cleaning" idea of a rug for your desktop.
 
 ## License
