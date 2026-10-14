@@ -173,11 +173,22 @@ sealed class Renderer
 
         DrawShadow(cv, c, origin);
 
-        for (int t = 0; t < indices.Length / 3; t++)
+        // Each band of rows is rasterized on its own core; bands never touch the same pixels.
+        int tris = indices.Length / 3;
+        ForBands(cv.H, (y0, y1) =>
         {
-            int surf = t < topTris ? 0 : t < topTris + backTris ? 1 : 2;
-            Raster(cv, verts[indices[3 * t]], verts[indices[3 * t + 1]], verts[indices[3 * t + 2]], surf);
-        }
+            for (int t = 0; t < tris; t++)
+            {
+                int surf = t < topTris ? 0 : t < topTris + backTris ? 1 : 2;
+                Raster(cv, verts[indices[3 * t]], verts[indices[3 * t + 1]], verts[indices[3 * t + 2]], surf, y0, y1);
+            }
+        });
+    }
+
+    static void ForBands(int rows, Action<int, int> body)
+    {
+        int bands = Math.Max(1, Math.Min(Environment.ProcessorCount, rows / 32));
+        Parallel.For(0, bands, b => body(rows * b / bands, rows * (b + 1) / bands));
     }
 
     void BuildVertices(Controller c, Vector2 origin)
@@ -230,13 +241,18 @@ sealed class Renderer
             float t = Math.Clamp(z / 400f, 0, 1);
             return new Vector3(f, 0.42f * (1 - 0.6f * t * t * (3 - 2 * t)));
         }
-        for (int t = 0; t < topTris; t++)
-            ShadowTri(cv, S(indices[3 * t]), S(indices[3 * t + 1]), S(indices[3 * t + 2]));
+        var shadowVerts = new Vector3[Cloth.N];
+        for (int k = 0; k < Cloth.N; k++) shadowVerts[k] = S(k);
+        ForBands(cv.SH, (y0, y1) =>
+        {
+            for (int t = 0; t < topTris; t++)
+                ShadowTri(cv, shadowVerts[indices[3 * t]], shadowVerts[indices[3 * t + 1]], shadowVerts[indices[3 * t + 2]], y0, y1);
+        });
 
         int radius = Math.Max(2, (int)MathF.Round(3 * Scale));
         for (int pass = 0; pass < 2; pass++) { BoxBlur(cv.Sh, cv.ShTmp, cv.SW, cv.SH, radius, true); BoxBlur(cv.ShTmp, cv.Sh, cv.SW, cv.SH, radius, false); }
 
-        for (int y = 0; y < cv.H; y++)
+        Parallel.For(0, cv.H, y =>
         {
             int sy = (y >> 1) * cv.SW, row = y * cv.W;
             for (int x = 0; x < cv.W; x++)
@@ -248,18 +264,18 @@ sealed class Renderer
                 float a = ((d >> 24) & 255) * k + sa * 255;
                 cv.Px[row + x] = ((uint)a << 24) | ((uint)(((d >> 16) & 255) * k) << 16) | ((uint)(((d >> 8) & 255) * k) << 8) | (uint)((d & 255) * k);
             }
-        }
+        });
     }
 
-    static void ShadowTri(Canvas cv, Vector3 a, Vector3 b, Vector3 c)
+    static void ShadowTri(Canvas cv, Vector3 a, Vector3 b, Vector3 c, int y0, int y1)
     {
         float area = (b.X - a.X) * (c.Y - a.Y) - (b.Y - a.Y) * (c.X - a.X);
         if (MathF.Abs(area) < 1e-6f) return;
         float inv = 1 / area;
         int minX = Math.Max(0, (int)MathF.Floor(MathF.Min(a.X, MathF.Min(b.X, c.X))));
         int maxX = Math.Min(cv.SW - 1, (int)MathF.Ceiling(MathF.Max(a.X, MathF.Max(b.X, c.X))));
-        int minY = Math.Max(0, (int)MathF.Floor(MathF.Min(a.Y, MathF.Min(b.Y, c.Y))));
-        int maxY = Math.Min(cv.SH - 1, (int)MathF.Ceiling(MathF.Max(a.Y, MathF.Max(b.Y, c.Y))));
+        int minY = Math.Max(y0, (int)MathF.Floor(MathF.Min(a.Y, MathF.Min(b.Y, c.Y))));
+        int maxY = Math.Min(y1 - 1, (int)MathF.Ceiling(MathF.Max(a.Y, MathF.Max(b.Y, c.Y))));
         for (int y = minY; y <= maxY; y++)
         {
             float py = y + 0.5f;
@@ -304,15 +320,15 @@ sealed class Renderer
             }
     }
 
-    void Raster(Canvas cv, in V a, in V b, in V c, int surf)
+    void Raster(Canvas cv, in V a, in V b, in V c, int surf, int y0, int y1)
     {
         float area = (b.X - a.X) * (c.Y - a.Y) - (b.Y - a.Y) * (c.X - a.X);
         if (MathF.Abs(area) < 1e-6f) return;
         float inv = 1 / area;
         int minX = Math.Max(0, (int)MathF.Floor(MathF.Min(a.X, MathF.Min(b.X, c.X))));
         int maxX = Math.Min(cv.W - 1, (int)MathF.Ceiling(MathF.Max(a.X, MathF.Max(b.X, c.X))));
-        int minY = Math.Max(0, (int)MathF.Floor(MathF.Min(a.Y, MathF.Min(b.Y, c.Y))));
-        int maxY = Math.Min(cv.H - 1, (int)MathF.Ceiling(MathF.Max(a.Y, MathF.Max(b.Y, c.Y))));
+        int minY = Math.Max(y0, (int)MathF.Floor(MathF.Min(a.Y, MathF.Min(b.Y, c.Y))));
+        int maxY = Math.Min(y1 - 1, (int)MathF.Ceiling(MathF.Max(a.Y, MathF.Max(b.Y, c.Y))));
         if (minX > maxX || minY > maxY) return;
         var tex = surf == 0 ? top : back;
         float edgeR = ((EdgeColor >> 16) & 255) / 255f, edgeG = ((EdgeColor >> 8) & 255) / 255f, edgeB = (EdgeColor & 255) / 255f;
