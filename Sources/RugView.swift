@@ -31,13 +31,13 @@ final class Item {
     var url: URL
     var pos: F2
     var height: Float = 0
-    var targetHeight: Float = 9
+    var targetHeight: Float = ICON_LUMP
     var texture: MTLTexture?
     init(url: URL, pos: F2) {
         self.url = url
         self.pos = pos
     }
-    var bump: SIMD4<Float> { SIMD4(pos.x, pos.y, height, 22 + height * 2.2) }   // a soft lump about the size of the icon
+    var bump: SIMD4<Float> { SIMD4(pos.x, pos.y, height, LUMP_RADIUS) }   // a low, soft lump about the size of the icon
 }
 
 struct SavedItem: Codable { var name: String; var x: Float; var y: Float }
@@ -61,27 +61,6 @@ enum Store {
             k += 1
         }
         return url
-    }
-
-    static func size(of url: URL) -> Int64 {
-        if url.path.hasPrefix("/Volumes/") { return 1 << 30 }   // a mounted drive: a big lump, without crawling the disk
-        let keys: [URLResourceKey] = [.isDirectoryKey, .totalFileAllocatedSizeKey, .fileSizeKey]
-        let v = try? url.resourceValues(forKeys: Set(keys))
-        if v?.isDirectory != true { return Int64(v?.totalFileAllocatedSize ?? v?.fileSize ?? 0) }
-        var total: Int64 = 0, count = 0
-        let e = FileManager.default.enumerator(at: url, includingPropertiesForKeys: keys)
-        while let f = e?.nextObject() as? URL, count < 20000 {
-            let fv = try? f.resourceValues(forKeys: Set(keys))
-            total += Int64(fv?.totalFileAllocatedSize ?? fv?.fileSize ?? 0)
-            count += 1
-        }
-        return total
-    }
-
-    /// Bigger things make bigger lumps: ~5 pt for a tiny file, ~10 pt for a megabyte, up to 14 pt.
-    static func height(forBytes b: Int64) -> Float {
-        let kb = Float(max(b, 1)) / 1024
-        return min(max(4 + 0.6 * log2(kb + 1), 5), 14)
     }
 }
 
@@ -244,7 +223,6 @@ final class RugView: MTKView {
     private var grabOffset = F2.zero     // from the cursor to that vertex, so nothing jumps on pick-up
     private var hand = F2.zero
     var drawsItemIcons = false           // Finder draws the real icons; only the snapshot test draws its own
-    private var sizeCache: [String: Float] = [:]
     private var iconPoll: Timer?
     private var lastMouse = F2(-1, -1)
     private var lastGrab: GrabMode = .none
@@ -739,20 +717,6 @@ final class RugView: MTKView {
     private func makeItem(url: URL, pos: F2) -> Item {
         let it = Item(url: url, pos: pos)
         if drawsItemIcons, let device { it.texture = makeIconTexture(device: device, url: url) }
-        let key = url.path
-        if let h = sizeCache[key] {
-            it.targetHeight = h
-            it.height = h
-        } else {
-            DispatchQueue.global(qos: .utility).async {
-                let h = Store.height(forBytes: Store.size(of: url))
-                DispatchQueue.main.async {
-                    self.sizeCache[key] = h
-                    it.targetHeight = h
-                    self.wake()
-                }
-            }
-        }
         return it
     }
 

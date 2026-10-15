@@ -133,22 +133,6 @@ static class Store
         if (Directory.Exists(from)) Directory.Move(from, to); else File.Move(from, to);
     }
 
-    public static long SizeOf(string path)
-    {
-        try
-        {
-            if (File.Exists(path)) return new FileInfo(path).Length;
-            long total = 0; int count = 0;
-            foreach (var f in new DirectoryInfo(path).EnumerateFiles("*", new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true }))
-            {
-                total += f.Length;
-                if (++count > 20000) break;
-            }
-            return total;
-        }
-        catch { return 0; }
-    }
-
     public static void Save(Controller c)
     {
         try

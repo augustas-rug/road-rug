@@ -15,18 +15,11 @@ sealed class Item
 {
     public string Path;
     public Vector2 Pos;                 // DIPs
-    public float Height, TargetHeight = 9;
+    public float Height, TargetHeight = T.IconLump;
     public bool Hidden;
     public Image32 Icon;                // 100 x 100 DIP tile (icon + label), rendered at the current scale
     public Item(string path, Vector2 pos) { Path = path; Pos = pos; }
-    public Vector4 Bump => new(Pos.X, Pos.Y, Height, 22 + Height * 2.2f);   // a soft lump about the size of the icon
-
-    /// Bigger things make bigger lumps: ~5 pt for a tiny file, ~10 pt for a megabyte, up to 14 pt.
-    public static float HeightForBytes(long bytes)
-    {
-        float kb = Math.Max(bytes, 1) / 1024f;
-        return Math.Clamp(4 + 0.6f * MathF.Log2(kb + 1), 5, 14);
-    }
+    public Vector4 Bump => new(Pos.X, Pos.Y, Height, T.LumpRadius);   // a low, soft lump about the size of the icon
 }
 
 /// The rug and everything under it: grabbing, lifting, sliding, hit-testing and when to sleep.

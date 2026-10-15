@@ -17,7 +17,7 @@
   <img src="docs/demo.gif" width="720" alt="Road Rug: dragging, lifting and folding a city-roads play mat on the desktop">
 </p>
 
-Road Rug puts a kids' city-roads play mat on your desktop, right above your icons and below every window. It's a real cloth simulation: grab it, drag it around, peel up a corner, fold it over. Lay it over your desktop icons, or drop files onto it, and they're under the rug, leaving little lumps. Bigger files make bigger lumps.
+Road Rug puts a kids' city-roads play mat on your desktop, right above your icons and below every window. It's a real cloth simulation: grab it, drag it around, peel up a corner, fold it over. Lay it over your desktop icons, or drop files onto it, and they're under the rug, leaving little lumps. Piles of icons make bigger lumps.
 
 It runs natively on **macOS** (Swift + Metal) and **Windows** (C# / .NET), with the same physics and look on both.
 
@@ -25,7 +25,7 @@ It runs natively on **macOS** (Swift + Metal) and **Windows** (C# / .NET), with 
 
 - **Real cloth physics:** a heavy, thick rug that drapes, folds over itself and settles flat, then sleeps when still.
 - **Sweep files under the rug:** lay the rug over your desktop icons, or drop files onto it. Nothing is moved or hidden: they stay ordinary desktop icons, with the rug lying on top of them.
-- **Lumps:** every icon the rug covers makes a soft bump, sized by how big the file is.
+- **Lumps:** every icon the rug covers makes a small, soft bump, and a pile of icons in one spot makes a bigger mound.
 - **Get things back:** lift a corner or slide the rug away, and your files are right there on the desktop, as selectable as ever.
 - **Stays out of the way:** clicks pass straight through to your desktop everywhere the rug isn't.
 - **Remembers everything:** the rug's position and what's under it survive restarts.

@@ -16,6 +16,9 @@ static class T
     public const float AirDragXY = 0.97f;         // airborne parts fall rather than keep swinging over
     public const float MaxStep = 8f;              // DIP per substep; stops a teleport turning into an explosion
     public const float SafeDrop = 20f;            // drop height when (re)laying the rug
+    public const float IconLump = 3.5f;           // how much one desktop icon under the rug lifts it
+    public const float LumpRadius = 36f;          // how far that lump spreads
+    public const float LumpMax = 11f;             // a whole pile of icons levels off around this height
     public const float BendStiffness = 0.45f;     // smooth curves without flopping like paper
     public const float Thickness = 4f;            // pile height above the backing
     public const float LayerGap = Thickness + 1.5f;
@@ -106,15 +109,17 @@ sealed class Cloth
         for (int i = 0; i < N; i++) { P[i] += d3; Q[i] += d3; }
     }
 
+    /// The desk's height under the rug: each icon underneath adds a low, soft lump, so a pile of icons in one
+    /// spot makes a bigger mound. The total eases off towards LumpMax instead of growing without limit.
     public static float FloorHeight(float x, float y, Vector4[] bumps)
     {
-        float h = 0;
+        float sum = 0;
         foreach (var b in bumps)
         {
             float dx = x - b.X, dy = y - b.Y, d2 = dx * dx + dy * dy, r2 = b.W * b.W;
-            if (d2 < r2) { float t = 1 - d2 / r2; h = MathF.Max(h, b.Z * t * t); }
+            if (d2 < r2) { float t = 1 - d2 / r2; sum += b.Z * t * t; }
         }
-        return h;
+        return sum <= 0 ? 0 : T.LumpMax * (1 - MathF.Exp(-sum / T.LumpMax));
     }
 
     /// Advances one fixed frame. `bumps` are (x, y, height, radius) of things hidden under the rug.

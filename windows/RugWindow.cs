@@ -20,7 +20,6 @@ sealed class RugWindow : Form
     readonly Stopwatch clock = Stopwatch.StartNew();
     readonly NotifyIcon tray;
     readonly ContextMenuStrip menu;
-    readonly Dictionary<string, float> sizeCache = new(StringComparer.OrdinalIgnoreCase);
     readonly List<(string path, Point center, int tries)> pendingPlacements = new();
     double lastTick;
     float scale = 1;
@@ -229,16 +228,7 @@ sealed class RugWindow : Form
         ctl.Wake();
     }
 
-    Item MakeItem(string path, Vector2 pos)
-    {
-        var it = new Item(path, pos);
-        if (sizeCache.TryGetValue(path, out var h)) { it.TargetHeight = h; it.Height = h; return it; }
-        Task.Run(() => Item.HeightForBytes(Store.SizeOf(path))).ContinueWith(t =>
-        {
-            if (IsHandleCreated) BeginInvoke(() => { sizeCache[path] = t.Result; it.TargetHeight = t.Result; ctl.Wake(); });
-        });
-        return it;
-    }
+    static Item MakeItem(string path, Vector2 pos) => new(path, pos);
 
     /// Explorer only knows about a file a moment after it lands on the desktop, so placements are retried.
     void RetryPlacements()

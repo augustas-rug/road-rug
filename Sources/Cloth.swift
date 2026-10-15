@@ -17,6 +17,9 @@ let AIR_DAMPING: Float = 0.99
 let AIR_DRAG_XY: Float = 0.97        // airborne parts fall rather than keep swinging over
 let MAX_STEP: Float = 8              // pt per substep (~2900 pt/s); stops a teleport turning into an explosion
 let SAFE_DROP: Float = 20            // drop height when (re)laying the rug (above the tallest lump)
+let ICON_LUMP: Float = 3.5           // how much one desktop icon under the rug lifts it
+let LUMP_RADIUS: Float = 36          // how far that lump spreads
+let LUMP_MAX: Float = 11             // a whole pile of icons levels off around this height
 let BEND_STIFFNESS: Float = 0.45     // bends in smooth curves without flopping like paper; folds stay put
 let RUG_THICKNESS: Float = 4         // pile height: the printed side sits this far above the backing
 let LAYER_GAP: Float = RUG_THICKNESS + 1.5   // folded layers never get closer than this
@@ -124,18 +127,20 @@ final class Cloth {
         }
     }
 
+    /// The desk's height under the rug: each icon underneath adds a low, soft lump, so a pile of icons in one
+    /// spot makes a bigger mound. The total eases off towards LUMP_MAX instead of growing without limit.
     @inline(__always)
     static func floorHeight(_ x: Float, _ y: Float, _ bumps: [SIMD4<Float>]) -> Float {
-        var h: Float = 0
+        var sum: Float = 0
         for b in bumps {
             let dx = x - b.x, dy = y - b.y
             let d2 = dx * dx + dy * dy, r2 = b.w * b.w
             if d2 < r2 {
                 let t = 1 - d2 / r2
-                h = max(h, b.z * t * t)
+                sum += b.z * t * t
             }
         }
-        return h
+        return sum <= 0 ? 0 : LUMP_MAX * (1 - exp(-sum / LUMP_MAX))
     }
 
     /// Advances one fixed frame. `bumps` are (x, y, height, radius) of things hidden under the rug.

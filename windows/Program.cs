@@ -40,8 +40,10 @@ static class Snapshot
         var report = new List<string>();
 
         var center = new Vector2(W / 2f, H / 2f);
-        foreach (var (path, off, size) in new[] { (@"C:\Windows\notepad.exe", new Vector2(-150, -40), 4_000_000L), (@"C:\Windows\explorer.exe", new Vector2(120, 60), 900_000L) })
-            c.Items.Add(new Item(path, center + off) { Icon = ShellIcons.Tile(path, 1), TargetHeight = Item.HeightForBytes(size) });
+        // One icon on its own, and a pile of four in one spot (which should make a bigger mound).
+        c.Items.Add(new Item(@"C:\Windows\notepad.exe", center + new Vector2(-150, -40)) { Icon = ShellIcons.Tile(@"C:\Windows\notepad.exe", 1) });
+        for (int k = 0; k < 4; k++)
+            c.Items.Add(new Item(@"C:\Windows\explorer.exe", center + new Vector2(130 + k % 2 * 22, 50 + k / 2 * 18)) { Icon = ShellIcons.Tile(@"C:\Windows\explorer.exe", 1) });
 
         var renderTimes = new List<double>();
         void Frames(float seconds, Func<float, Vector2> mouse = null)
@@ -59,6 +61,8 @@ static class Snapshot
 
         Frames(1.5f);
         Shot("1-settled");
+        var bumps = c.Items.Select(i => i.Bump).ToArray();
+        report.Add($"lump height: single icon {Cloth.FloorHeight(center.X - 150, center.Y - 40, bumps):F1} pt, pile of four {Cloth.FloorHeight(center.X + 141, center.Y + 59, bumps):F1} pt");
 
         // Fold the bottom-right corner over towards the middle.
         var p = c.Rug.P[Cloth.N - 1];

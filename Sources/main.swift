@@ -66,7 +66,10 @@ func runSnapshots(into dir: String) {
     view.rug.layout(center: c, angle: 0.05, drop: SAFE_DROP)
     view.drawsItemIcons = true
     view.addDebugItem(url: URL(fileURLWithPath: "/System/Applications/Calculator.app"), at: c + F2(-150, 40))
-    view.addDebugItem(url: URL(fileURLWithPath: "/System/Applications/Chess.app"), at: c + F2(120, -60))
+    // A pile of four in one spot (should make a bigger mound than the single icon above).
+    for (k, app) in ["Chess", "TextEdit", "Notes", "Maps"].enumerated() {
+        view.addDebugItem(url: URL(fileURLWithPath: "/System/Applications/\(app).app"), at: c + F2(130, -50) + F2(Float(k % 2) * 22, Float(k / 2) * 18))
+    }
 
     func frames(_ seconds: Float, _ mouse: (Float) -> F2 = { _ in .zero }) {
         let steps = max(1, Int(seconds * 60))
@@ -79,6 +82,8 @@ func runSnapshots(into dir: String) {
 
     frames(1.5)
     shot("1-settled")
+    let bumps = view.items.map(\.bump)
+    FileHandle.standardError.write("lump height: single icon \(Cloth.floorHeight(c.x - 150, c.y + 40, bumps)) pt, pile of four \(Cloth.floorHeight(c.x + 141, c.y - 41, bumps)) pt\n".data(using: .utf8)!)
 
     // Fold the top-right corner over towards the middle.
     let p = view.rug.p[NY * NX - 1]
