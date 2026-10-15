@@ -33,7 +33,6 @@ final class Item {
     var height: Float = 0
     var targetHeight: Float = 9
     var texture: MTLTexture?
-    var hidden = false
     init(url: URL, pos: F2) {
         self.url = url
         self.pos = pos
@@ -42,7 +41,7 @@ final class Item {
 }
 
 struct SavedItem: Codable { var name: String; var x: Float; var y: Float }
-struct SavedState: Codable { var particles: [[Float]]; var items: [SavedItem] }
+struct SavedState: Codable { var particles: [[Float]]; var items: [SavedItem]? }
 
 enum GrabMode { case none, lift, slide }
 
@@ -50,6 +49,7 @@ enum Store {
     static let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("Road Rug", isDirectory: true)
     static let stash = support.appendingPathComponent("Under the Rug", isDirectory: true)
+    static let desktop = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask)[0]
     static let state = support.appendingPathComponent("state.json")
 
     static func uniqueURL(in dir: URL, name: String) -> URL {
@@ -195,7 +195,7 @@ fragment float4 iconFrag(IO in [[stage_in]], texture2d<float> tex [[texture(0)]]
 }
 """
 
-final class RugView: MTKView, NSDraggingSource {
+final class RugView: MTKView {
     let rug: Cloth
     var items: [Item] = []
 
@@ -242,9 +242,14 @@ final class RugView: MTKView, NSDraggingSource {
     private var idleTime: Float = 0      // seconds since the rug was last handled
     private var grabOffset = F2.zero     // from the cursor to that vertex, so nothing jumps on pick-up
     private var hand = F2.zero
-    private var pressedItem: Item?
-    private var pressPoint = F2.zero
-    private var draggingItem: Item?
+    var drawsItemIcons = false           // Finder draws the real icons; only the snapshot test draws its own
+    private var sizeCache: [String: Float] = [:]
+    private var iconPoll: Timer?
+    private var lastMouse = F2(-1, -1)
+    private var lastGrab: GrabMode = .none
+    private var lastTopWindow = -1
+    private var lastTopCovers = false
+    private var lastIconCount = -1
 
     init(frame: NSRect, device: MTLDevice) {
         queue = device.makeCommandQueue()!
@@ -307,6 +312,9 @@ final class RugView: MTKView, NSDraggingSource {
         l.add(to: .main, forMode: .common)
         link = l
         updateWalls()
+        // Keep up with the desktop icons (cheap: one Finder query every couple of seconds, off the main thread).
+        refreshDesktopIcons()
+        iconPoll = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.refreshDesktopIcons() }
     }
 
     func updateWalls() {
@@ -403,14 +411,6 @@ final class RugView: MTKView, NSDraggingSource {
         return best.map { (k: $0.0, z: $0.1) }
     }
 
-    private func hitItem(_ s: F2) -> Item? {
-        if hitRug(s) != nil { return nil }
-        for it in items.reversed() where !it.hidden {
-            if abs(s.x - it.pos.x) <= 40 && s.y >= it.pos.y - 52 && s.y <= it.pos.y + 34 { return it }
-        }
-        return nil
-    }
-
     private func point(_ p: NSPoint) -> F2 {
         let v = convert(p, from: nil)
         return F2(Float(v.x), Float(v.y))
@@ -431,16 +431,34 @@ final class RugView: MTKView, NSDraggingSource {
         lastTime = now
 
         let mouse = point(window.mouseLocationOutsideOfEventStream)
-        let over = grab != .none || pressedItem != nil || hitRug(mouse) != nil || hitItem(mouse) != nil
-        if window.ignoresMouseEvents == over { window.ignoresMouseEvents = !over }
-        if over {
-            (grab == .none ? NSCursor.openHand : NSCursor.closedHand).set()
-        } else if cursorOver {
-            NSCursor.arrow.set()
+        // Only re-test what's under the cursor when it moved or the rug did; an idle desktop costs nothing.
+        if grab != .none || awake || mouse != lastMouse {
+            lastMouse = mouse
+            let over = grab != .none || (hitRug(mouse) != nil && !coveredByWindow(at: NSEvent.mouseLocation))
+            if window.ignoresMouseEvents == over { window.ignoresMouseEvents = !over }
+            if over != cursorOver || grab != lastGrab {
+                if over { (grab == .none ? NSCursor.openHand : NSCursor.closedHand).set() } else { NSCursor.arrow.set() }
+            }
+            cursorOver = over
+            lastGrab = grab
         }
-        cursorOver = over
 
         if advance(dt: dt, mouse: mouse) { draw() }
+    }
+
+    /// True when another app's window sits on top of the rug at this screen point, so the rug must not react.
+    private func coveredByWindow(at p: NSPoint) -> Bool {
+        guard let window else { return false }
+        let top = NSWindow.windowNumber(at: p, belowWindowWithWindowNumber: 0)
+        if top == window.windowNumber || top == 0 { return false }
+        if top != lastTopWindow {
+            lastTopWindow = top
+            // Anything layered above our desktop-level window (any normal app window) covers the rug.
+            let info = CGWindowListCopyWindowInfo(.optionIncludingWindow, CGWindowID(top)) as? [[String: Any]]
+            let layer = info?.first?[kCGWindowLayer as String] as? Int ?? 0
+            lastTopCovers = layer > window.level.rawValue
+        }
+        return lastTopCovers
     }
 
     /// Runs physics for one display frame. Returns false when the rug is asleep and nothing changed.
@@ -483,7 +501,7 @@ final class RugView: MTKView, NSDraggingSource {
             }
         }
 
-        let bumps = items.filter { !$0.hidden }.map(\.bump)
+        let bumps = items.map(\.bump)
         acc += dt
         var steps = 0
         while acc >= FIXED_DT && steps < 4 {
@@ -564,7 +582,7 @@ final class RugView: MTKView, NSDraggingSource {
         enc.setRenderPipelineState(iconPipe)
         enc.setDepthStencilState(depthOff)
         enc.setFragmentSamplerState(sampler, index: 0)
-        for it in items where !it.hidden {
+        for it in items where drawsItemIcons {
             guard let tex = it.texture else { continue }
             var iu = IconUniforms(center: it.pos - F2(0, 16), size: F2(100, 100), alpha: 1)
             enc.setVertexBytes(&iu, length: MemoryLayout<IconUniforms>.stride, index: 0)
@@ -602,13 +620,6 @@ final class RugView: MTKView, NSDraggingSource {
         }
         if beginGrab(at: s, forceLift: e.modifierFlags.contains(.option)) {
             NSCursor.closedHand.set()
-        } else if let it = hitItem(s) {
-            if e.clickCount == 2 {
-                NSWorkspace.shared.open(it.url)
-                return
-            }
-            pressedItem = it
-            pressPoint = s
         }
     }
 
@@ -639,23 +650,7 @@ final class RugView: MTKView, NSDraggingSource {
         return true
     }
 
-    override func mouseDragged(with e: NSEvent) {
-        guard let it = pressedItem else { return }
-        let s = point(e.locationInWindow)
-        guard simd_length(s - pressPoint) > 4 else { return }
-        pressedItem = nil
-        let img = NSWorkspace.shared.icon(forFile: it.url.path)
-        img.size = NSSize(width: 64, height: 64)
-        let di = NSDraggingItem(pasteboardWriter: it.url as NSURL)
-        di.setDraggingFrame(NSRect(x: CGFloat(it.pos.x) - 32, y: CGFloat(it.pos.y) - 32, width: 64, height: 64), contents: img)
-        it.hidden = true
-        draggingItem = it
-        wake()
-        beginDraggingSession(with: [di], event: e, source: self)
-    }
-
     override func mouseUp(with e: NSEvent) {
-        pressedItem = nil
         release()
     }
 
@@ -668,6 +663,7 @@ final class RugView: MTKView, NSDraggingSource {
         grabbed = []
         grab = .none
         wake()
+        refreshDesktopIcons()
     }
 
     override func rotate(with e: NSEvent) {
@@ -684,9 +680,6 @@ final class RugView: MTKView, NSDraggingSource {
         m.addItem(withTitle: "Straighten Rug", action: #selector(straighten), keyEquivalent: "").target = self
         m.addItem(withTitle: "Move Rug to Center", action: #selector(recenter), keyEquivalent: "").target = self
         m.addItem(.separator())
-        m.addItem(withTitle: "Show What's Under the Rug", action: #selector(openStash), keyEquivalent: "").target = self
-        m.addItem(withTitle: "Put Everything Back on Desktop", action: #selector(returnAll), keyEquivalent: "").target = self
-        m.addItem(.separator())
         m.addItem(withTitle: "Quit Road Rug", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         return m
     }
@@ -701,19 +694,57 @@ final class RugView: MTKView, NSDraggingSource {
         wake()
     }
 
-    @objc func openStash() {
-        NSWorkspace.shared.open(Store.stash)
+    // MARK: - Desktop icons under the rug
+
+    /// Finder is the source of truth: every file stays a real desktop icon, and the rug simply lies on top.
+    /// Whatever the rug covers makes a lump. This keeps `items` in step with Finder's icon positions.
+    func refreshDesktopIcons() {
+        guard persistenceEnabled else { return }
+        let screenH = Float(bounds.height)
+        Finder.desktopIcons { [weak self] icons in
+            guard let self else { return }
+            var byPath = Dictionary(uniqueKeysWithValues: self.items.map { ($0.url.standardizedFileURL.path, $0) })
+            var next: [Item] = []
+            var changed = false
+            for icon in icons {
+                let pos = F2(Float(icon.position.x), screenH - Float(icon.position.y))
+                let key = icon.url.standardizedFileURL.path
+                if let it = byPath.removeValue(forKey: key) {
+                    if simd_length(it.pos - pos) > 0.5 { it.pos = pos; changed = true }
+                    next.append(it)
+                } else {
+                    next.append(self.makeItem(url: icon.url, pos: pos))
+                    changed = true
+                }
+            }
+            if !byPath.isEmpty { changed = true }
+            self.items = next
+            if changed {
+                if next.count != self.lastIconCount { NSLog("Road Rug: tracking \(next.count) desktop icons") }
+                self.lastIconCount = next.count
+                self.wake()
+            }
+        }
     }
 
-    @objc func returnAll() {
-        let desk = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask)[0]
-        for it in items {
-            let dest = Store.uniqueURL(in: desk, name: it.url.lastPathComponent)
-            do { try FileManager.default.moveItem(at: it.url, to: dest) } catch { NSLog("Road Rug: \(error)") }
+    private func makeItem(url: URL, pos: F2) -> Item {
+        let it = Item(url: url, pos: pos)
+        if drawsItemIcons, let device { it.texture = makeIconTexture(device: device, url: url) }
+        let key = url.path
+        if let h = sizeCache[key] {
+            it.targetHeight = h
+            it.height = h
+        } else {
+            DispatchQueue.global(qos: .utility).async {
+                let h = Store.height(forBytes: Store.size(of: url))
+                DispatchQueue.main.async {
+                    self.sizeCache[key] = h
+                    it.targetHeight = h
+                    self.wake()
+                }
+            }
         }
-        items.removeAll { !FileManager.default.fileExists(atPath: $0.url.path) }
-        save()
-        wake()
+        return it
     }
 
     // MARK: - Sweeping files under the rug (drop target)
@@ -725,6 +756,8 @@ final class RugView: MTKView, NSDraggingSource {
         hitRug(point(sender.draggingLocation)) != nil ? .move : []
     }
 
+    /// Dropping files onto the rug tucks them under it: they stay ordinary desktop icons (anything from
+    /// another folder is moved onto the Desktop first), and Finder places them where they were dropped.
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         let s = point(sender.draggingLocation)
         guard hitRug(s) != nil,
@@ -732,59 +765,32 @@ final class RugView: MTKView, NSDraggingSource {
                                                                options: [.urlReadingFileURLsOnly: true]) as? [URL]
         else { return false }
         let base = unproject(s, z: 0)
+        var placed: [(URL, CGPoint)] = []
         for (n, url) in urls.enumerated() {
             let a = Float(n) * 2.39996, r = 30 * Float(n).squareRoot()
             let pos = base + F2(cos(a), sin(a)) * r
-            if let it = items.first(where: { $0.url.standardizedFileURL == url.standardizedFileURL }) {
-                it.pos = pos
-                it.hidden = false
-                continue
+            var onDesk = url
+            if url.deletingLastPathComponent().standardizedFileURL != Store.desktop.standardizedFileURL {
+                onDesk = Store.uniqueURL(in: Store.desktop, name: url.lastPathComponent)
+                do { try FileManager.default.moveItem(at: url, to: onDesk) } catch {
+                    NSLog("Road Rug: could not move \(url.path) to the Desktop: \(error)")
+                    NSSound.beep()
+                    continue
+                }
             }
-            let dest = Store.uniqueURL(in: Store.stash, name: url.lastPathComponent)
-            do {
-                try FileManager.default.moveItem(at: url, to: dest)
-                addItem(url: dest, pos: pos)
-            } catch {
-                NSLog("Road Rug: could not sweep \(url.path): \(error)")
-                NSSound.beep()
+            placed.append((onDesk, CGPoint(x: CGFloat(pos.x), y: bounds.height - CGFloat(pos.y))))
+            if let it = items.first(where: { $0.url.standardizedFileURL == onDesk.standardizedFileURL }) {
+                it.pos = pos
+            } else {
+                items.append(makeItem(url: onDesk, pos: pos))   // the lump appears straight away
             }
         }
-        save()
+        Finder.place(placed) { [weak self] in self?.refreshDesktopIcons() }
         wake()
         return true
     }
 
-    // MARK: - Pulling files back out (drag source)
-
-    func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
-        context == .outsideApplication ? [.move, .copy, .generic] : .move
-    }
-
-    func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
-        guard let it = draggingItem else { return }
-        draggingItem = nil
-        it.hidden = false
-        if !FileManager.default.fileExists(atPath: it.url.path) {
-            items.removeAll { $0 === it }
-        }
-        save()
-        wake()
-    }
-
-    // MARK: - Items & persistence
-
-    private func addItem(url: URL, pos: F2) {
-        let it = Item(url: url, pos: pos)
-        if let device { it.texture = makeIconTexture(device: device, url: url) }
-        items.append(it)
-        DispatchQueue.global(qos: .utility).async {
-            let h = Store.height(forBytes: Store.size(of: url))
-            DispatchQueue.main.async {
-                it.targetHeight = h
-                self.wake()
-            }
-        }
-    }
+    // MARK: - Persistence
 
     private func load() {
         let fm = FileManager.default
@@ -793,8 +799,8 @@ final class RugView: MTKView, NSDraggingSource {
         if !fm.fileExists(atPath: Store.support.path), fm.fileExists(atPath: legacy.path) {
             try? fm.moveItem(at: legacy, to: Store.support)
         }
-        try? fm.createDirectory(at: Store.stash, withIntermediateDirectories: true)
-        var known = Set<String>()
+        try? fm.createDirectory(at: Store.support, withIntermediateDirectories: true)
+        var savedSpots: [String: F2] = [:]
         if let data = try? Data(contentsOf: Store.state),
            let st = try? JSONDecoder().decode(SavedState.self, from: data) {
             if st.particles.count == rug.n {
@@ -803,28 +809,40 @@ final class RugView: MTKView, NSDraggingSource {
                     rug.q[i] = rug.p[i]
                 }
             }
-            for si in st.items {
-                let url = Store.stash.appendingPathComponent(si.name)
-                guard fm.fileExists(atPath: url.path) else { continue }
-                known.insert(si.name)
-                addItem(url: url, pos: F2(si.x, si.y))
-            }
+            for si in st.items ?? [] { savedSpots[si.name] = F2(si.x, si.y) }
         }
-        let c = rug.centroid
-        let loose = (try? fm.contentsOfDirectory(atPath: Store.stash.path)) ?? []
-        for (n, name) in loose.filter({ !known.contains($0) && !$0.hasPrefix(".") }).enumerated() {
-            let a = Float(n) * 2.39996, r = 40 * Float(n).squareRoot()
-            addItem(url: Store.stash.appendingPathComponent(name), pos: c + F2(cos(a), sin(a)) * r)
-        }
+        rescueStash(savedSpots: savedSpots)
         updateProjection()
     }
 
-    // MARK: - Headless snapshots (used by `Rug --snapshot <dir>` to check rendering and physics)
+    /// Version 1.0 hid swept files in a folder of their own. Put each one back on the Desktop, in the spot
+    /// it had under the rug, so it's a normal desktop icon again.
+    private func rescueStash(savedSpots: [String: F2]) {
+        let fm = FileManager.default
+        let names = ((try? fm.contentsOfDirectory(atPath: Store.stash.path)) ?? []).filter { !$0.hasPrefix(".") }
+        var placed: [(URL, CGPoint)] = []
+        let c = rug.centroid
+        for (n, name) in names.enumerated() {
+            let dest = Store.uniqueURL(in: Store.desktop, name: name)
+            guard (try? fm.moveItem(at: Store.stash.appendingPathComponent(name), to: dest)) != nil else { continue }
+            let a = Float(n) * 2.39996, r = 40 * Float(n).squareRoot()
+            let pos = savedSpots[name] ?? c + F2(cos(a), sin(a)) * r
+            placed.append((dest, CGPoint(x: CGFloat(pos.x), y: bounds.height - CGFloat(pos.y))))
+        }
+        if placed.isEmpty {
+            try? fm.removeItem(at: Store.stash.appendingPathComponent(".DS_Store"))
+            try? fm.removeItem(at: Store.stash)   // only succeeds if it's now empty
+        } else {
+            Finder.place(placed) { [weak self] in self?.refreshDesktopIcons() }
+        }
+    }
+
+    // MARK: - Headless snapshots (used by `RoadRug --snapshot <dir>` to check rendering and physics)
 
     var persistenceEnabled = true
 
     func addDebugItem(url: URL, at pos: F2) {
-        addItem(url: url, pos: pos)
+        items.append(makeItem(url: url, pos: pos))
     }
 
     func writeSnapshot(to path: String) {
@@ -865,8 +883,52 @@ final class RugView: MTKView, NSDraggingSource {
 
     func save() {
         guard persistenceEnabled else { return }
-        let st = SavedState(particles: rug.p.map { [$0.x, $0.y, $0.z] },
-                            items: items.map { SavedItem(name: $0.url.lastPathComponent, x: $0.pos.x, y: $0.pos.y) })
+        let st = SavedState(particles: rug.p.map { [$0.x, $0.y, $0.z] }, items: nil)
         if let data = try? JSONEncoder().encode(st) { try? data.write(to: Store.state, options: .atomic) }
+    }
+}
+
+/// Talks to Finder (AppleScript, off the main thread): where the desktop icons are, and moving them.
+/// Positions are Finder's: points from the top-left corner of the main screen.
+enum Finder {
+    private static let queue = DispatchQueue(label: "Road Rug Finder", qos: .utility)
+    private static let listScript = NSAppleScript(source: """
+        tell application "Finder"
+            set out to ""
+            repeat with i in (get every item of desktop)
+                try
+                    set p to desktop position of i
+                    set out to out & (POSIX path of (i as alias)) & tab & (item 1 of p) & tab & (item 2 of p) & linefeed
+                end try
+            end repeat
+            return out
+        end tell
+        """)
+
+    static func desktopIcons(_ done: @escaping ([(url: URL, position: CGPoint)]) -> Void) {
+        queue.async {
+            var error: NSDictionary?
+            guard let text = listScript?.executeAndReturnError(&error).stringValue else { return }
+            let icons: [(url: URL, position: CGPoint)] = text.split(separator: "\n").compactMap { line in
+                let f = line.split(separator: "\t", omittingEmptySubsequences: false)
+                guard f.count == 3, let x = Double(f[1]), let y = Double(f[2]) else { return nil }
+                return (URL(fileURLWithPath: String(f[0])), CGPoint(x: x, y: y))
+            }
+            DispatchQueue.main.async { done(icons) }
+        }
+    }
+
+    static func place(_ icons: [(URL, CGPoint)], then done: @escaping () -> Void) {
+        guard !icons.isEmpty else { return done() }
+        queue.async {
+            for (url, p) in icons {
+                let path = url.path.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+                let src = "tell application \"Finder\" to set desktop position of (POSIX file \"\(path)\" as alias) to {\(Int(p.x)), \(Int(p.y))}"
+                var error: NSDictionary?
+                NSAppleScript(source: src)?.executeAndReturnError(&error)
+                if let error { NSLog("Road Rug: Finder couldn't place \(url.lastPathComponent): \(error)") }
+            }
+            DispatchQueue.main.async(execute: done)
+        }
     }
 }

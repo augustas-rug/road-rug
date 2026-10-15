@@ -64,6 +64,7 @@ func runSnapshots(into dir: String) {
     view.rug.walls = SIMD4(0, 0, size.x, size.y)
     let c = size / 2
     view.rug.layout(center: c, angle: 0.05, drop: SAFE_DROP)
+    view.drawsItemIcons = true
     view.addDebugItem(url: URL(fileURLWithPath: "/System/Applications/Calculator.app"), at: c + F2(-150, 40))
     view.addDebugItem(url: URL(fileURLWithPath: "/System/Applications/Chess.app"), at: c + F2(120, -60))
 

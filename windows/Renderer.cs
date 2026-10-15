@@ -425,7 +425,7 @@ sealed class Renderer
         float m = 24 + T.Thickness + maxZ * 0.6f;           // shadow offset and blur
         var r = RectangleF.FromLTRB(minX - m, minY - m, maxX + m, maxY + m);
         foreach (var it in c.Items)
-            if (!it.Hidden) r = RectangleF.Union(r, new RectangleF(it.Pos.X - 50, it.Pos.Y - 34, 100, 100));
+            if (!it.Hidden && it.Icon != null) r = RectangleF.Union(r, new RectangleF(it.Pos.X - 50, it.Pos.Y - 34, 100, 100));
         return r;
     }
 }

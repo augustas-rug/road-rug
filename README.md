@@ -17,16 +17,16 @@
   <img src="docs/demo.gif" width="720" alt="Road Rug: dragging, lifting and folding a city-roads play mat on the desktop">
 </p>
 
-Road Rug puts a kids' city-roads play mat on your desktop, right above your icons and below every window. It's a real cloth simulation: grab it, drag it around, peel up a corner, fold it over. Drop files onto it and they're swept underneath, leaving little lumps in the rug. Bigger files make bigger lumps.
+Road Rug puts a kids' city-roads play mat on your desktop, right above your icons and below every window. It's a real cloth simulation: grab it, drag it around, peel up a corner, fold it over. Lay it over your desktop icons, or drop files onto it, and they're under the rug, leaving little lumps. Bigger files make bigger lumps.
 
 It runs natively on **macOS** (Swift + Metal) and **Windows** (C# / .NET), with the same physics and look on both.
 
 ## Features
 
 - **Real cloth physics:** a heavy, thick rug that drapes, folds over itself and settles flat, then sleeps when still.
-- **Sweep files under the rug:** drag anything from your desktop onto the rug and it disappears underneath. It's moved into a hidden folder, not deleted.
-- **Lumps:** everything hidden under the rug makes a soft bump, sized by how big it is.
-- **Get things back:** lift a corner or slide the rug away to uncover your files, then drag them back to the desktop or double-click to open.
+- **Sweep files under the rug:** lay the rug over your desktop icons, or drop files onto it. Nothing is moved or hidden: they stay ordinary desktop icons, with the rug lying on top of them.
+- **Lumps:** every icon the rug covers makes a soft bump, sized by how big the file is.
+- **Get things back:** lift a corner or slide the rug away, and your files are right there on the desktop, as selectable as ever.
 - **Stays out of the way:** clicks pass straight through to your desktop everywhere the rug isn't.
 - **Remembers everything:** the rug's position and what's under it survive restarts.
 
@@ -63,12 +63,11 @@ Requires Windows 10 or 11.
 | Drag a corner or edge | Lift it and fold it over |
 | Hold <kbd>⌥ Option</kbd> (Mac) or <kbd>Alt</kbd> (Windows) and drag anywhere | Lift from that spot |
 | Two-finger rotate (Mac trackpad) or <kbd>Shift</kbd> + scroll (Windows) | Twist the rug |
-| Drop files from the desktop onto it | Sweep them under the rug |
-| Drag an uncovered item off the rug | Put it back on your desktop |
+| Lay the rug over desktop icons, or drop files onto it | Sweep them under the rug |
 | Double-click the rug | Lay it flat again |
-| Right-click the rug, or use the menu-bar / tray icon | Straighten, recenter, show what's hidden, put everything back, quit |
+| Right-click the rug, or use the menu-bar / tray icon | Straighten, recenter, quit |
 
-Swept items live in `~/Library/Application Support/Road Rug/Under the Rug` on macOS and `%APPDATA%\Road Rug\Under the Rug` on Windows. **Put Everything Back on Desktop** in the menu returns them all at once.
+Road Rug finds your desktop icons through Finder (macOS asks you once to allow this) or Explorer. Files dropped onto the rug from another folder are moved to your Desktop, so everything under the rug is always a normal desktop icon.
 
 ## Build from source
 
@@ -111,11 +110,11 @@ Both versions have a headless test scene: `RoadRug --snapshot <folder>` settles 
 
 ### Making a demo
 
-`scripts/demo-mess.sh` (macOS) fills your desktop with about 40 realistic junk files to sweep under the rug on camera. `scripts/demo-clean.sh` moves exactly those files to the Trash afterwards, even if they're under the rug.
+`scripts/demo-mess.sh` (macOS) fills your desktop with about 40 realistic junk files to sweep under the rug on camera. `scripts/demo-clean.sh` moves exactly those files to the Trash afterwards.
 
 ## Uninstall
 
-Choose **Put Everything Back on Desktop** first if anything is still under the rug, then quit Road Rug from its menu.
+Quit Road Rug from its menu. Your files are already on your desktop.
 
 - **macOS:** delete the app and `~/Library/Application Support/Road Rug`.
 - **Windows:** turn off **Start with Windows** if you turned it on, then delete `RoadRug.exe` and `%APPDATA%\Road Rug`.

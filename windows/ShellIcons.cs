@@ -114,11 +114,12 @@ static class Store
 {
     public static readonly string Dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Road Rug");
     public static readonly string Stash = Path.Combine(Dir, "Under the Rug");
+    public static readonly string Desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
     static readonly string StateFile = Path.Combine(Dir, "state.json");
     static readonly JsonSerializerOptions Json = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
     sealed class SavedItem { public string Name { get; set; } public float X { get; set; } public float Y { get; set; } }
-    sealed class SavedState { public List<float[]> Particles { get; set; } = new(); public List<SavedItem> Items { get; set; } = new(); }
+    sealed class SavedState { public List<float[]> Particles { get; set; } = new(); public List<SavedItem> Items { get; set; } }
 
     public static string UniquePath(string dir, string name)
     {
@@ -154,7 +155,6 @@ static class Store
         {
             var st = new SavedState();
             foreach (var p in c.Rug.P) st.Particles.Add(new[] { p.X, p.Y, p.Z });
-            foreach (var it in c.Items) st.Items.Add(new SavedItem { Name = Path.GetFileName(it.Path), X = it.Pos.X, Y = it.Pos.Y });
             Directory.CreateDirectory(Dir);
             File.WriteAllText(StateFile + ".tmp", JsonSerializer.Serialize(st, Json));
             File.Move(StateFile + ".tmp", StateFile, true);
@@ -162,11 +162,10 @@ static class Store
         catch { /* best effort */ }
     }
 
-    /// Restores the rug and re-adds everything in the stash (items without a saved spot go near the middle).
-    public static void Load(Controller c, Action<string, Vector2> addItem)
+    /// Restores the rug, and returns where each file swept by version 1.0 was lying (to put it back there).
+    public static Dictionary<string, Vector2> Load(Controller c)
     {
-        Directory.CreateDirectory(Stash);
-        var known = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var spots = new Dictionary<string, Vector2>(StringComparer.OrdinalIgnoreCase);
         try
         {
             if (File.Exists(StateFile) && JsonSerializer.Deserialize<SavedState>(File.ReadAllText(StateFile), Json) is { } st)
@@ -174,26 +173,11 @@ static class Store
                 if (st.Particles.Count == Cloth.N)
                     for (int i = 0; i < Cloth.N; i++)
                         if (st.Particles[i].Length == 3) c.Rug.P[i] = c.Rug.Q[i] = new Vector3(st.Particles[i][0], st.Particles[i][1], st.Particles[i][2]);
-                foreach (var si in st.Items)
-                {
-                    var path = Path.Combine(Stash, si.Name);
-                    if (!File.Exists(path) && !Directory.Exists(path)) continue;
-                    known.Add(si.Name);
-                    addItem(path, new Vector2(si.X, si.Y));
-                }
+                foreach (var si in st.Items ?? new()) spots[si.Name] = new Vector2(si.X, si.Y);
             }
         }
         catch { /* corrupt state: start fresh */ }
-        var center = c.Rug.Centroid;
-        int n = 0;
-        foreach (var path in Directory.EnumerateFileSystemEntries(Stash))
-        {
-            var name = Path.GetFileName(path);
-            if (known.Contains(name) || name.StartsWith('.') || name.Equals("desktop.ini", StringComparison.OrdinalIgnoreCase)) continue;
-            float a = n * 2.39996f, r = 40 * MathF.Sqrt(n);
-            addItem(path, center + new Vector2(MathF.Cos(a), MathF.Sin(a)) * r);
-            n++;
-        }
         c.UpdateProjection();
+        return spots;
     }
 }

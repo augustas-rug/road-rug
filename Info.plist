@@ -2,33 +2,35 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>CFBundleIdentifier</key>
-	<string>com.augustasarmalis.roadrug</string>
-	<key>CFBundleName</key>
-	<string>Road Rug</string>
 	<key>CFBundleDisplayName</key>
 	<string>Road Rug</string>
 	<key>CFBundleExecutable</key>
 	<string>RoadRug</string>
 	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.augustasarmalis.roadrug</string>
+	<key>CFBundleName</key>
+	<string>Road Rug</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0.0</string>
+	<string>1.2.0</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>3</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.utilities</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Road Rug asks Finder where your desktop icons are, so files under the rug make lumps, and to place files you drop onto the rug.</string>
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>Road Rug moves files you drop onto the rug onto your Desktop, so they stay ordinary desktop icons under it.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>
 	<string>© 2026 Augustas Armalis. MIT License.</string>
-	<key>NSDesktopFolderUsageDescription</key>
-	<string>Road Rug moves the files you sweep under it out of your Desktop, and puts them back when you pull them out.</string>
 </dict>
 </plist>

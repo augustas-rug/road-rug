@@ -101,6 +101,12 @@ static class Snapshot
 
         bool nan = c.Rug.P.Any(v => float.IsNaN(v.X) || float.IsNaN(v.Y) || float.IsNaN(v.Z));
         if (nan) report.Add("FAIL NaN in the cloth");
+        try
+        {
+            var icons = DesktopIcons.List();
+            report.Add($"desktop icons via Explorer: {icons.Count}" + (icons.Count > 0 ? $" (first: {Path.GetFileName(icons[0].Path)} at {icons[0].Center})" : ""));
+        }
+        catch (Exception ex) { report.Add($"FAIL reading desktop icons: {ex.GetType().Name} {ex.Message}"); }
         report.Add($"max stretch {c.Rug.MaxStretch():F3}");
         report.Add($"full-frame render {renderTimes.Average():F1} ms, rug-sized render {perFrame:F1} ms ({small.W}x{small.H}), physics step {perStep:F2} ms");
         report.Add(report.Any(l => l.StartsWith("FAIL")) ? "RESULT FAIL" : "RESULT OK");

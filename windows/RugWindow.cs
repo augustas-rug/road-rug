@@ -7,8 +7,8 @@ using Microsoft.Win32;
 namespace RoadRug;
 
 /// A borderless, per-pixel-alpha layered window just above the desktop icons and below every app window.
-/// It only covers the rug (and anything lying uncovered on the desk), moves with it, and lets clicks
-/// through everywhere else.
+/// It only covers the rug, moves with it, and lets clicks through everywhere else. Files are never hidden
+/// away: they stay real desktop icons, and the rug simply lies on top of them.
 sealed class RugWindow : Form
 {
     readonly Controller ctl;
@@ -16,14 +16,16 @@ sealed class RugWindow : Form
     Renderer renderer;
     readonly Canvas canvas = new();
     readonly System.Windows.Forms.Timer timer = new() { Interval = 10 };
+    readonly System.Windows.Forms.Timer iconPoll = new() { Interval = 2000 };
     readonly Stopwatch clock = Stopwatch.StartNew();
     readonly NotifyIcon tray;
     readonly ContextMenuStrip menu;
+    readonly Dictionary<string, float> sizeCache = new(StringComparer.OrdinalIgnoreCase);
+    readonly List<(string path, Point center, int tries)> pendingPlacements = new();
     double lastTick;
     float scale = 1;
-    bool clickThrough = true, needsPresent = true;
-    Item pressedItem;
-    Point pressPoint;
+    bool clickThrough = true, needsPresent = true, wasGrabbing;
+    Point lastCursor = new(int.MinValue, 0);
 
     public RugWindow()
     {
@@ -40,7 +42,7 @@ sealed class RugWindow : Form
 
         var area = Screen.PrimaryScreen.Bounds;
         ctl = new Controller(new Vector2(area.Width / 2f, area.Height / 2f));   // replaced once the DPI is known
-        ctl.Settled += () => Store.Save(ctl);
+        ctl.Settled += () => { Store.Save(ctl); RefreshDesktopIcons(); };
 
         menu = BuildMenu();
         tray = new NotifyIcon
@@ -52,6 +54,7 @@ sealed class RugWindow : Form
         };
         tray.DoubleClick += (_, _) => ctl.Recenter();
         timer.Tick += (_, _) => Tick();
+        iconPoll.Tick += (_, _) => RefreshDesktopIcons();
     }
 
     // MARK: Window setup
@@ -77,9 +80,12 @@ sealed class RugWindow : Form
         renderer = new Renderer(rugImage, scale);
         UpdateScreen();
         ctl.Recenter();
-        Store.Load(ctl, AddItem);
+        var savedSpots = Store.Load(ctl);
+        RescueStash(savedSpots);
+        RefreshDesktopIcons();
         ctl.Wake();
         timer.Start();
+        iconPoll.Start();
         SystemEvents.DisplaySettingsChanged += (_, _) => BeginInvoke(UpdateScreen);
     }
 
@@ -88,7 +94,6 @@ sealed class RugWindow : Form
         base.OnDpiChanged(e);
         scale = e.DeviceDpiNew / 96f;
         renderer = new Renderer(rugImage, scale);
-        foreach (var it in ctl.Items) it.Icon = ShellIcons.Tile(it.Path, scale);
         UpdateScreen();
     }
 
@@ -137,10 +142,17 @@ sealed class RugWindow : Form
         float dt = lastTick == 0 ? 1 / 60f : (float)Math.Min(now - lastTick, 1 / 20.0);
         lastTick = now;
 
-        var mouse = CursorDip();
-        bool over = ctl.Grabbing || pressedItem != null || ctl.HitRug(mouse) != null || ctl.HitItem(mouse) != null;
-        SetClickThrough(!over);
-        Cursor = ctl.Grabbing ? Cursors.SizeAll : Cursors.Hand;
+        var cursor = Cursor.Position;
+        var mouse = new Vector2(cursor.X / scale, cursor.Y / scale);
+        // Only re-test what's under the cursor when it moved or the rug did; an idle desktop costs nothing.
+        if (ctl.Grabbing || ctl.Awake || cursor != lastCursor)
+        {
+            lastCursor = cursor;
+            bool over = ctl.Grabbing || (ctl.HitRug(mouse) != null && !Native.CoveredByAnotherWindow(Handle, cursor));
+            SetClickThrough(!over);
+            if (ctl.Grabbing != wasGrabbing) Cursor = ctl.Grabbing ? Cursors.SizeAll : Cursors.Hand;
+            wasGrabbing = ctl.Grabbing;
+        }
 
         if (ctl.Advance(dt, mouse) || needsPresent) Present();
     }
@@ -174,38 +186,14 @@ sealed class RugWindow : Form
         if (e.Button == MouseButtons.Right) { menu.Show(Cursor.Position); return; }
         if (e.Button != MouseButtons.Left) return;
         if (e.Clicks == 2 && ctl.HitRug(s) != null) { ctl.Straighten(); return; }      // lay it flat again
-        if (ctl.BeginGrab(s, ModifierKeys.HasFlag(Keys.Alt))) { Capture = true; return; }
-        if (ctl.HitItem(s) is { } it)
-        {
-            if (e.Clicks == 2) { Open(it.Path); return; }
-            pressedItem = it;
-            pressPoint = Cursor.Position;
-        }
-    }
-
-    protected override void OnMouseMove(MouseEventArgs e)
-    {
-        if (pressedItem == null) return;
-        var p = Cursor.Position;
-        if (Math.Abs(p.X - pressPoint.X) + Math.Abs(p.Y - pressPoint.Y) < 5) return;
-        // Pull it back out: a real file drag, so Explorer moves it wherever it's dropped.
-        var it = pressedItem;
-        pressedItem = null;
-        it.Hidden = true;
-        ctl.Wake();
-        Present();
-        DoDragDrop(new DataObject(DataFormats.FileDrop, new[] { it.Path }), DragDropEffects.Move | DragDropEffects.Copy);
-        it.Hidden = false;
-        if (!File.Exists(it.Path) && !Directory.Exists(it.Path)) ctl.Items.Remove(it);
-        Store.Save(ctl);
-        ctl.Wake();
+        if (ctl.BeginGrab(s, ModifierKeys.HasFlag(Keys.Alt))) Capture = true;
     }
 
     protected override void OnMouseUp(MouseEventArgs e)
     {
-        pressedItem = null;
         Capture = false;
         ctl.Release();
+        RefreshDesktopIcons();
     }
 
     protected override void OnMouseWheel(MouseEventArgs e)
@@ -213,7 +201,84 @@ sealed class RugWindow : Form
         if (ModifierKeys.HasFlag(Keys.Shift)) ctl.Twist(e.Delta / 120f * 0.06f);   // Shift + scroll twists the rug
     }
 
-    // MARK: Sweeping files under the rug
+    // MARK: Desktop icons under the rug
+
+    /// Explorer is the source of truth: every file stays a real desktop icon, and whatever the rug covers
+    /// makes a lump. This keeps the controller's items in step with Explorer's icon positions.
+    void RefreshDesktopIcons()
+    {
+        RetryPlacements();
+        var icons = DesktopIcons.List();
+        var byPath = ctl.Items.ToDictionary(i => i.Path, StringComparer.OrdinalIgnoreCase);
+        var next = new List<Item>();
+        bool changed = false;
+        foreach (var icon in icons)
+        {
+            var pos = new Vector2(icon.Center.X / scale, icon.Center.Y / scale);
+            if (byPath.Remove(icon.Path, out var it))
+            {
+                if (Vector2.Distance(it.Pos, pos) > 0.5f) { it.Pos = pos; changed = true; }
+                next.Add(it);
+            }
+            else { next.Add(MakeItem(icon.Path, pos)); changed = true; }
+        }
+        if (byPath.Count > 0) changed = true;
+        if (!changed) return;
+        ctl.Items.Clear();
+        ctl.Items.AddRange(next);
+        ctl.Wake();
+    }
+
+    Item MakeItem(string path, Vector2 pos)
+    {
+        var it = new Item(path, pos);
+        if (sizeCache.TryGetValue(path, out var h)) { it.TargetHeight = h; it.Height = h; return it; }
+        Task.Run(() => Item.HeightForBytes(Store.SizeOf(path))).ContinueWith(t =>
+        {
+            if (IsHandleCreated) BeginInvoke(() => { sizeCache[path] = t.Result; it.TargetHeight = t.Result; ctl.Wake(); });
+        });
+        return it;
+    }
+
+    /// Explorer only knows about a file a moment after it lands on the desktop, so placements are retried.
+    void RetryPlacements()
+    {
+        for (int i = pendingPlacements.Count - 1; i >= 0; i--)
+        {
+            var (path, center, tries) = pendingPlacements[i];
+            if (DesktopIcons.Place(path, center) || tries >= 10) pendingPlacements.RemoveAt(i);
+            else pendingPlacements[i] = (path, center, tries + 1);
+        }
+        iconPoll.Interval = pendingPlacements.Count > 0 ? 300 : 2000;
+    }
+
+    Point ScreenPoint(Vector2 dip) => new((int)MathF.Round(dip.X * scale), (int)MathF.Round(dip.Y * scale));
+
+    /// Version 1.0 hid swept files in a folder of their own. Put each one back on the Desktop, in the spot
+    /// it had under the rug, so it's a normal desktop icon again.
+    void RescueStash(Dictionary<string, Vector2> savedSpots)
+    {
+        if (!Directory.Exists(Store.Stash)) return;
+        var center = ctl.Rug.Centroid;
+        int n = 0;
+        foreach (var path in Directory.EnumerateFileSystemEntries(Store.Stash).ToArray())
+        {
+            var name = Path.GetFileName(path);
+            if (name.StartsWith('.') || name.Equals("desktop.ini", StringComparison.OrdinalIgnoreCase)) continue;
+            try
+            {
+                var dest = Store.UniquePath(Store.Desktop, name);
+                Store.Move(path, dest);
+                float a = n * 2.39996f, r = 40 * MathF.Sqrt(n++);
+                var spot = savedSpots.TryGetValue(name, out var s) ? s : center + new Vector2(MathF.Cos(a), MathF.Sin(a)) * r;
+                pendingPlacements.Add((dest, ScreenPoint(spot), 0));
+            }
+            catch { /* leave it where it is */ }
+        }
+        try { if (!Directory.EnumerateFileSystemEntries(Store.Stash).Any()) Directory.Delete(Store.Stash); } catch { }
+    }
+
+    // MARK: Dropping files onto the rug
 
     bool OverRug(DragEventArgs e) => ctl.HitRug(new Vector2(e.X / scale, e.Y / scale)) != null;
 
@@ -224,6 +289,8 @@ sealed class RugWindow : Form
         e.Effect = e.Data.GetDataPresent(DataFormats.FileDrop) && OverRug(e) ? DragDropEffects.Move : DragDropEffects.None;
     }
 
+    /// Dropping files onto the rug tucks them under it: they stay ordinary desktop icons (anything from
+    /// another folder is moved onto the Desktop first), and Explorer places them where they were dropped.
     protected override void OnDragDrop(DragEventArgs e)
     {
         if (!OverRug(e) || e.Data.GetData(DataFormats.FileDrop) is not string[] paths) return;
@@ -232,32 +299,23 @@ sealed class RugWindow : Form
         {
             float a = n * 2.39996f, r = 30 * MathF.Sqrt(n);
             var pos = at + new Vector2(MathF.Cos(a), MathF.Sin(a)) * r;
-            var path = paths[n];
-            if (ctl.Items.Find(i => string.Equals(i.Path, path, StringComparison.OrdinalIgnoreCase)) is { } existing)
-            {
-                existing.Pos = pos; existing.Hidden = false;
-                continue;
-            }
+            var path = paths[n].TrimEnd('\\');
             try
             {
-                var dest = Store.UniquePath(Store.Stash, Path.GetFileName(path.TrimEnd('\\')));
-                Store.Move(path, dest);
-                AddItem(dest, pos);
+                if (!string.Equals(Path.GetDirectoryName(path), Store.Desktop, StringComparison.OrdinalIgnoreCase))
+                {
+                    var dest = Store.UniquePath(Store.Desktop, Path.GetFileName(path));
+                    Store.Move(path, dest);
+                    path = dest;
+                }
+                pendingPlacements.Add((path, ScreenPoint(pos), 0));
+                if (ctl.Items.Find(i => string.Equals(i.Path, path, StringComparison.OrdinalIgnoreCase)) is { } existing) existing.Pos = pos;
+                else ctl.Items.Add(MakeItem(path, pos));          // the lump appears straight away
             }
             catch { System.Media.SystemSounds.Beep.Play(); }
         }
-        Store.Save(ctl);
+        RetryPlacements();
         ctl.Wake();
-    }
-
-    void AddItem(string path, Vector2 pos)
-    {
-        var it = new Item(path, pos) { Icon = ShellIcons.Tile(path, scale) };
-        ctl.Items.Add(it);
-        Task.Run(() => Item.HeightForBytes(Store.SizeOf(path))).ContinueWith(t =>
-        {
-            if (IsHandleCreated) BeginInvoke(() => { it.TargetHeight = t.Result; ctl.Wake(); });
-        });
     }
 
     // MARK: Menu
@@ -268,9 +326,6 @@ sealed class RugWindow : Form
         m.Items.Add("Straighten Rug", null, (_, _) => ctl.Straighten());
         m.Items.Add("Move Rug to Center", null, (_, _) => ctl.Recenter());
         m.Items.Add(new ToolStripSeparator());
-        m.Items.Add("Show What's Under the Rug", null, (_, _) => Open(Store.Stash));
-        m.Items.Add("Put Everything Back on Desktop", null, (_, _) => ReturnAll());
-        m.Items.Add(new ToolStripSeparator());
         var startup = new ToolStripMenuItem("Start with Windows") { Checked = Autostart.Enabled, CheckOnClick = true };
         startup.CheckedChanged += (_, _) => Autostart.Enabled = startup.Checked;
         m.Items.Add(startup);
@@ -278,21 +333,10 @@ sealed class RugWindow : Form
         return m;
     }
 
-    static void Open(string path) => Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
-
-    void ReturnAll()
-    {
-        var desk = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
-        foreach (var it in ctl.Items.ToArray())
-            try { Store.Move(it.Path, Store.UniquePath(desk, Path.GetFileName(it.Path))); ctl.Items.Remove(it); }
-            catch { /* leave it under the rug */ }
-        Store.Save(ctl);
-        ctl.Wake();
-    }
-
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
         timer.Stop();
+        iconPoll.Stop();
         Store.Save(ctl);
         tray.Visible = false;
         base.OnFormClosing(e);
@@ -322,7 +366,7 @@ static class Native
     public const long WS_EX_LAYERED = 0x80000, WS_EX_TRANSPARENT = 0x20, WS_EX_TOOLWINDOW = 0x80, WS_EX_NOACTIVATE = 0x8000000;
     public const int WM_MOUSEACTIVATE = 0x21, WM_WINDOWPOSCHANGING = 0x46, WM_CAPTURECHANGED = 0x215, MA_NOACTIVATE = 3;
     public const uint SWP_NOZORDER = 0x4;
-    const uint GW_HWNDPREV = 3, ULW_ALPHA = 2;
+    const uint GW_HWNDPREV = 3, GA_ROOT = 2, ULW_ALPHA = 2;
 
     [StructLayout(LayoutKind.Sequential)]
     public struct WINDOWPOS { public IntPtr hwnd, hwndInsertAfter; public int x, y, cx, cy; public uint flags; }
@@ -339,6 +383,8 @@ static class Native
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] public static extern IntPtr GetWindowLongPtr(IntPtr h, int i);
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")] public static extern IntPtr SetWindowLongPtr(IntPtr h, int i, IntPtr v);
     [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr h, uint cmd);
+    [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(POINT p);
+    [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr h, uint flags);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string cls, string title);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr FindWindow(string cls, string title);
     delegate bool EnumProc(IntPtr h, IntPtr l);
@@ -371,6 +417,16 @@ static class Native
         if (host == IntPtr.Zero) return IntPtr.Zero;
         var prev = GetWindow(host, GW_HWNDPREV);
         return prev == self ? IntPtr.Zero : prev;
+    }
+
+    /// True when another app's window is on top at this screen point, so the rug must not react.
+    /// (Our window is click-through while idle, so the hit test sees whatever is beneath it.)
+    public static bool CoveredByAnotherWindow(IntPtr self, Point p)
+    {
+        var hit = WindowFromPoint(new POINT { X = p.X, Y = p.Y });
+        if (hit == IntPtr.Zero) return false;
+        var root = GetAncestor(hit, GA_ROOT);
+        return root != self && root != DesktopHost();
     }
 
     static IntPtr memDC, dib, dibBits;
