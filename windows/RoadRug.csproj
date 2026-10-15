@@ -16,7 +16,7 @@
     <Authors>Augustas Armalis</Authors>
     <Copyright>© 2026 Augustas Armalis. MIT License.</Copyright>
     <Description>A physics rug for your desktop. Sweep your mess under it.</Description>
-    <Version>1.1.0</Version>
+    <Version>1.2.0</Version>
     <InvariantGlobalization>true</InvariantGlobalization>
     <TieredPGO>true</TieredPGO>
     <ServerGarbageCollector>false</ServerGarbageCollector>
