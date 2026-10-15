@@ -64,6 +64,7 @@ enum Store {
     }
 
     static func size(of url: URL) -> Int64 {
+        if url.path.hasPrefix("/Volumes/") { return 1 << 30 }   // a mounted drive: a big lump, without crawling the disk
         let keys: [URLResourceKey] = [.isDirectoryKey, .totalFileAllocatedSizeKey, .fileSizeKey]
         let v = try? url.resourceValues(forKeys: Set(keys))
         if v?.isDirectory != true { return Int64(v?.totalFileAllocatedSize ?? v?.fileSize ?? 0) }
@@ -247,8 +248,8 @@ final class RugView: MTKView {
     private var iconPoll: Timer?
     private var lastMouse = F2(-1, -1)
     private var lastGrab: GrabMode = .none
-    private var lastTopWindow = -1
-    private var lastTopCovers = false
+    private var windowsAbove: [CGRect] = []
+    private var windowsAboveTime: CFTimeInterval = 0
     private var lastIconCount = -1
 
     init(frame: NSRect, device: MTLDevice) {
@@ -447,18 +448,26 @@ final class RugView: MTKView {
     }
 
     /// True when another app's window sits on top of the rug at this screen point, so the rug must not react.
+    /// Asks the window server for the visible windows stacked above ours (cached briefly; it's cheap either way).
     private func coveredByWindow(at p: NSPoint) -> Bool {
-        guard let window else { return false }
-        let top = NSWindow.windowNumber(at: p, belowWindowWithWindowNumber: 0)
-        if top == window.windowNumber || top == 0 { return false }
-        if top != lastTopWindow {
-            lastTopWindow = top
-            // Anything layered above our desktop-level window (any normal app window) covers the rug.
-            let info = CGWindowListCopyWindowInfo(.optionIncludingWindow, CGWindowID(top)) as? [[String: Any]]
-            let layer = info?.first?[kCGWindowLayer as String] as? Int ?? 0
-            lastTopCovers = layer > window.level.rawValue
+        guard let window, let screen = window.screen ?? NSScreen.screens.first else { return false }
+        let now = CACurrentMediaTime()
+        if now - windowsAboveTime > 0.25 {
+            windowsAboveTime = now
+            let mainH = NSScreen.screens.first?.frame.height ?? screen.frame.height
+            let list = CGWindowListCopyWindowInfo([.optionOnScreenAboveWindow, .excludeDesktopElements],
+                                                  CGWindowID(window.windowNumber)) as? [[String: Any]] ?? []
+            windowsAbove = list.compactMap { w in
+                // Ignore invisible windows and the very-high overlay layers some utilities draw everywhere;
+                // normal windows, the Dock (20) and the menu bar (24) all count.
+                guard (w[kCGWindowAlpha as String] as? Double ?? 1) > 0.01, (w[kCGWindowLayer as String] as? Int ?? 0) < 25,
+                      let b = w[kCGWindowBounds as String] as? [String: CGFloat],
+                      let x = b["X"], let y = b["Y"], let width = b["Width"], let height = b["Height"] else { return nil }
+                // Window-server bounds are top-left based; flip into Cocoa screen coordinates.
+                return CGRect(x: x, y: mainH - y - height, width: width, height: height)
+            }
         }
-        return lastTopCovers
+        return windowsAbove.contains { $0.contains(p) }
     }
 
     /// Runs physics for one display frame. Returns false when the rug is asleep and nothing changed.
@@ -811,27 +820,35 @@ final class RugView: MTKView {
             }
             for si in st.items ?? [] { savedSpots[si.name] = F2(si.x, si.y) }
         }
-        rescueStash(savedSpots: savedSpots)
+        rescueStash(Store.stash, savedSpots: savedSpots)
+        // The pre-rename build ("Rug") kept its own folder: rescue that too, using its saved spots.
+        // (`legacy` is the pre-rename folder found above.)
+        var legacySpots: [String: F2] = [:]
+        if let data = try? Data(contentsOf: legacy.appendingPathComponent("state.json")),
+           let st = try? JSONDecoder().decode(SavedState.self, from: data) {
+            for si in st.items ?? [] { legacySpots[si.name] = F2(si.x, si.y) }
+        }
+        rescueStash(legacy.appendingPathComponent("Under the Rug", isDirectory: true), savedSpots: legacySpots)
         updateProjection()
     }
 
     /// Version 1.0 hid swept files in a folder of their own. Put each one back on the Desktop, in the spot
     /// it had under the rug, so it's a normal desktop icon again.
-    private func rescueStash(savedSpots: [String: F2]) {
+    private func rescueStash(_ stash: URL, savedSpots: [String: F2]) {
         let fm = FileManager.default
-        let names = ((try? fm.contentsOfDirectory(atPath: Store.stash.path)) ?? []).filter { !$0.hasPrefix(".") }
+        let names = ((try? fm.contentsOfDirectory(atPath: stash.path)) ?? []).filter { !$0.hasPrefix(".") }
         var placed: [(URL, CGPoint)] = []
         let c = rug.centroid
         for (n, name) in names.enumerated() {
             let dest = Store.uniqueURL(in: Store.desktop, name: name)
-            guard (try? fm.moveItem(at: Store.stash.appendingPathComponent(name), to: dest)) != nil else { continue }
+            guard (try? fm.moveItem(at: stash.appendingPathComponent(name), to: dest)) != nil else { continue }
             let a = Float(n) * 2.39996, r = 40 * Float(n).squareRoot()
             let pos = savedSpots[name] ?? c + F2(cos(a), sin(a)) * r
             placed.append((dest, CGPoint(x: CGFloat(pos.x), y: bounds.height - CGFloat(pos.y))))
         }
         if placed.isEmpty {
-            try? fm.removeItem(at: Store.stash.appendingPathComponent(".DS_Store"))
-            try? fm.removeItem(at: Store.stash)   // only succeeds if it's now empty
+            try? fm.removeItem(at: stash.appendingPathComponent(".DS_Store"))
+            try? fm.removeItem(at: stash)   // only succeeds if it's now empty
         } else {
             Finder.place(placed) { [weak self] in self?.refreshDesktopIcons() }
         }
